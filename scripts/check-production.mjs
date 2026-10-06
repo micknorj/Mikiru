@@ -1,0 +1,60 @@
+import {createRequire} from 'node:module';
+import {createServer} from 'node:http';
+import {readFile} from 'node:fs/promises';
+import {resolve,extname,sep} from 'node:path';
+import assert from 'node:assert/strict';
+const require=createRequire(import.meta.url); const {chromium}=require(process.env.PLAYWRIGHT_MODULE);
+const root=resolve(process.env.MIKIRU_PRODUCTION_DIR??'dist/frontend');
+const server=createServer(async(req,res)=>{try { const p=decodeURIComponent(new URL(req.url,'http://127.0.0.1').pathname); if(!p.startsWith('/Mikiru/')) {res.writeHead(404);res.end();return;} const file=resolve(root,p.slice('/Mikiru/'.length)||'index.html'); if(!file.startsWith(root+sep)){res.writeHead(403);res.end();return;} const body=await readFile(file);res.writeHead(200,{'Content-Type':{'.html':'text/html','.js':'application/javascript','.css':'text/css','.woff2':'font/woff2'}[extname(file)]??'application/octet-stream'});res.end(body);}catch{res.writeHead(404);res.end();}});
+await new Promise(r=>server.listen(4173,'127.0.0.1',r));
+const browser=await chromium.launch({headless:true});
+try{
+for(const [saved,os,expected] of [[null,'light','light'],[null,'dark','dark'],['light','dark','light'],['dark','light','dark']]){
+  const ground=expected==='dark'?'rgb(0, 0, 0)':'rgb(255, 224, 224)';
+  const initial=await browser.newContext({colorScheme:os,timezoneId:'Asia/Bangkok',reducedMotion:'reduce'});const tab=await initial.newPage();
+  await tab.addInitScript(saved=>{if(saved===null)localStorage.removeItem('mikiru.appearance');else localStorage.setItem('mikiru.appearance',saved);},saved);
+  await tab.addInitScript(()=>document.addEventListener('securitypolicyviolation',e=>window.__violations=(window.__violations??[]).concat(e.violatedDirective)));
+  await tab.route('https://api.mikiru.invalid/**',r=>r.fulfill({status:404,headers:{'Access-Control-Allow-Origin':'http://127.0.0.1:4173'}}));
+  let release;const gate=new Promise(r=>release=r);await tab.route(/\/assets\/index-.*\.(?:js|css)$/,async r=>{await gate;await r.continue();});
+  await tab.goto('http://127.0.0.1:4173/Mikiru/',{waitUntil:'commit'});await tab.waitForFunction(()=>!!document.documentElement.dataset.appearance);
+  assert.equal(await tab.evaluate(()=>getComputedStyle(document.documentElement).backgroundColor),ground);
+  release();await tab.getByRole('button',{name:'Start chatting'}).waitFor();
+  await tab.reload();await tab.getByRole('button',{name:'Start chatting'}).waitFor();
+  assert.equal(await tab.evaluate(()=>document.documentElement.dataset.appearance),expected);assert.equal(await tab.evaluate(()=>getComputedStyle(document.documentElement).backgroundColor),ground);
+  assert.deepEqual(await tab.evaluate(()=>window.__violations??[]),[]);await initial.close();
+}
+const context=await browser.newContext({timezoneId:'Asia/Bangkok',reducedMotion:'reduce'}); const page=await context.newPage();const violations=[];const errors=[]; const urls=[];page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>urls.push(r.url())); await page.clock.install({time:new Date('2026-10-05T05:00:00Z')});await page.addInitScript(()=>document.addEventListener('securitypolicyviolation',e=>window.__violations=(window.__violations??[]).concat(e.violatedDirective)));
+const art=await readFile('.private/art/mikiru.webp');
+await page.route('https://api.mikiru.invalid/**',async route=>{const req=route.request(); const headers={'Access-Control-Allow-Origin':'http://127.0.0.1:4173','Content-Type':'application/json'};if(req.url().endsWith('/art/mikiru'))return route.fulfill({status:200,headers:{...headers,'Content-Type':'image/webp'},body:art});if(req.method()==='OPTIONS')return route.fulfill({status:204,headers:{...headers,'Access-Control-Allow-Methods':'POST','Access-Control-Allow-Headers':'content-type'}});const r=req.postDataJSON();return route.fulfill({status:200,headers,body:JSON.stringify({requestId:crypto.randomUUID(),instanceId:r.instanceId,baseRevision:r.baseRevision,reply:'<b>literal text</b>',acceptedStatePatch:{memoryOps:[],relationshipDelta:{familiarity:0,trust:0,closeness:0},moodDelta:{positive:0,irritation:0,sadness:0,embarrassment:0,concern:0,jealousy:0,suspicion:0}}})});});
+await page.goto('http://127.0.0.1:4173/Mikiru/');
+await page.waitForFunction(()=>document.querySelector('.portrait')?.naturalWidth===3000);
+await page.getByRole('button',{name:'Start chatting'}).click();
+await page.locator('.portrait').evaluate(el=>el.decode());
+assert.equal(await page.locator('img').count(),1);
+await page.getByRole('textbox',{name:'Message'}).fill('Test plain output');
+await page.getByRole('button',{name:'Send',exact:true}).click();
+await page.getByText('<b>literal text</b>',{exact:true}).waitFor();
+assert.equal(await page.locator('.message-text b').count(),0);
+await page.reload();await page.getByRole('button',{name:'Continue chatting'}).click();await page.getByText('<b>literal text</b>',{exact:true}).waitFor();
+await page.emulateMedia({reducedMotion:'no-preference'});
+await page.getByRole('button',{name:'About Mikiru'}).click();
+const closing=await page.evaluate(()=>{
+  document.querySelector('.close-about').click();const dialog=document.querySelector('.about-dialog');
+  return {open:dialog.open,duration:dialog.getAnimations().at(-1)?.effect.getTiming().duration};
+});
+assert.deepEqual(closing,{open:true,duration:120});
+await page.getByRole('dialog').waitFor({state:'hidden'});
+await page.getByRole('textbox',{name:'Message'}).fill('reset yourself');
+await page.getByRole('textbox',{name:'Message'}).press('Enter');
+assert.equal(await page.getByRole('button',{name:'Cancel',exact:true}).evaluate(el=>el===document.activeElement&&getComputedStyle(el).outlineWidth==='0px'),true);
+await page.mouse.click(8,8);await page.getByRole('dialog').waitFor({state:'hidden'});
+assert.equal(await page.locator('.mikiru-message').count(),1);
+assert.equal(await page.getByRole('textbox',{name:'Message'}).evaluate(el=>el===document.activeElement),true);
+await page.getByRole('textbox',{name:'Message'}).press('Enter');
+await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'hidden'});
+assert.equal(await page.locator('.mikiru-message').count(),1);
+violations.push(...await page.evaluate(()=>window.__violations??[]));
+assert.deepEqual(violations,[]);assert.deepEqual(errors,[]);
+assert.ok(urls.filter(u=>new URL(u).origin==='http://127.0.0.1:4173').every(u=>new URL(u).pathname.startsWith('/Mikiru/')));
+console.log('Production CSP hashes and saved/System appearance before paint, panel motion/focus/backdrop dismissal, literal rendering, WOFF2/font/art load, persistence and /Mikiru/ project paths passed; all HTTPS API calls were intercepted locally.');
+await context.close();}finally{await browser.close();await new Promise(r=>server.close(r));}

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#ffe0e0" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Mikiru · Mick's Lab</title>
+    <style>html { background: #ffe0e0; color-scheme: light; } html[data-appearance="dark"] { background: #000000; color-scheme: dark; } @media (prefers-color-scheme: dark) { html:not([data-appearance="light"]) { background: #000000; color-scheme: dark; } }</style>
+    <script data-appearance-init>(() => { let choice; try { choice = localStorage.getItem('mikiru.appearance'); } catch {} const mode = choice === 'light' || choice === 'dark' ? choice : matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; document.documentElement.dataset.appearance = mode; document.querySelector('meta[name="theme-color"]').content = mode === 'dark' ? '#000000' : '#ffe0e0'; })();</script>
+    <link rel="preload" href="/src/client/fonts/Caveat-Regular.woff2" as="font" type="font/woff2" crossorigin />
+    <script type="module" src="/src/client/main.ts"></script>
+  </head>
+  <body>
+    <main id="app"></main>
+  </body>
+</html>

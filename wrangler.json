@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mikiru",
+  "main": ".private/worker/entry.ts",
+  "compatibility_date": "2026-10-01",
+  "send_metrics": false,
+  "observability": { "enabled": false },
+  "dependencies_instrumentation": { "enabled": false },
+  "secrets": { "required": ["GROQ_API_KEY"] },
+  "vars": {
+    "ALLOWED_ORIGIN": "https://micknorj.github.io",
+    "MIKIRU_ZDR_CONFIRMED": "false"
+  },
+  "rules": [{ "type": "Text", "globs": ["**/*.txt"], "fallthrough": false }],
+  "assets": {
+    "directory": ".private/worker/assets",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "html_handling": "none",
+    "not_found_handling": "none"
+  }
+}

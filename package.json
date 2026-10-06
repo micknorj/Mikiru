@@ -1,0 +1,36 @@
+{
+  "name": "mikiru",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "dev": "vite --configLoader native --host 127.0.0.1",
+    "dev:backend": "node --env-file-if-exists=.private/backend.env --experimental-transform-types --disable-warning=ExperimentalWarning scripts/worker-dev.mjs",
+    "dev:fixture": "node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/worker-dev.mjs --fixture",
+    "build:frontend": "vite build --configLoader native",
+    "build:worker": "node scripts/build-worker.mjs",
+    "build": "npm run build:frontend && npm run build:worker && node scripts/check-public.mjs && node scripts/check-assets.mjs",
+    "worker:prepare": "node --env-file-if-exists=.private/backend.env --experimental-transform-types --disable-warning=ExperimentalWarning scripts/prepare-worker.mjs",
+    "worker:check": "node --env-file-if-exists=.private/backend.env --experimental-transform-types --disable-warning=ExperimentalWarning scripts/check-worker.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-transform-types --disable-warning=ExperimentalWarning --test tests/*.test.ts",
+    "test:browser-flow": "node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/check-local-flow.mjs",
+    "test:worker-local": "node --experimental-transform-types --disable-warning=ExperimentalWarning scripts/check-worker-local.mjs",
+    "check": "npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.1",
+    "esbuild": "0.28.1",
+    "fake-indexeddb": "^6.2.0",
+    "typescript": "5.9.3",
+    "vite": "7.3.6",
+    "wrangler": "4.147.0"
+  }
+}
