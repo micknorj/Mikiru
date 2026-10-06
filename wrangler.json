@@ -3,6 +3,7 @@
   "name": "mikiru",
   "main": ".private/worker/entry.ts",
   "compatibility_date": "2026-10-01",
+  "preview_urls": false,
   "send_metrics": false,
   "observability": { "enabled": false },
   "dependencies_instrumentation": { "enabled": false },
