@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dialogueMessages, stateMessages } from '../backend/prompts.ts';
+import { turnMessages } from '../backend/prompts.ts';
 import { chatRequestSchema } from '../src/shared/contracts.ts';
 import { Settings } from '../src/client/settings.ts';
 import { Controller } from '../src/client/controller.ts';
@@ -12,15 +12,16 @@ test('Descriptions default Off is strict conversation; On is adaptive; state ins
   const r = request();
   const { descriptions: _, ...olderRequest } = r;
   assert.equal(chatRequestSchema.parse(olderRequest).descriptions, false);
-  const off = dialogueMessages(r, 'SYNTHETIC_CHARACTER');
-  const on = dialogueMessages({ ...r, descriptions: true }, 'SYNTHETIC_CHARACTER');
+  const off = turnMessages(r, 'SYNTHETIC_CHARACTER');
+  const on = turnMessages({ ...r, descriptions: true }, 'SYNTHETIC_CHARACTER');
   assert.match(off[0]!.content, /Descriptions Off: pure conversational text only/);
   assert.match(off[0]!.content, /No narrated actions, asterisk stage directions/);
   assert.match(on[0]!.content, /Descriptions On: use adaptive descriptions/);
   assert.match(on[0]!.content, /emotionally significant scenes/);
   assert.match(on[0]!.content, /must not overwhelm dialogue/);
   assert.deepEqual(off[1], on[1]);
-  assert.deepEqual(stateMessages(r, 'Same reply', 'SYNTHETIC_CHARACTER'), stateMessages({ ...r, descriptions: true }, 'Same reply', 'SYNTHETIC_CHARACTER'));
+  const style = /Descriptions (?:On|Off):[^\n]+/;
+  assert.equal(off[0]!.content.replace(style, ''), on[0]!.content.replace(style, ''), 'only presentation changes; memory/progression/mood instructions remain identical');
   assert.equal(chatRequestSchema.safeParse({ ...r, descriptions: 'on' }).success, false);
 });
 

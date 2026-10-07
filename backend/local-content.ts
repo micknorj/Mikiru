@@ -2,7 +2,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { validateRuntime, validateArtwork, type PrivateContent } from './private-content.ts';
 import { PRIVATE_LIMITS } from './config.ts';
 export class LocalContent implements PrivateContent {
-  constructor(readonly runtimePath = '.private/runtime/mikiru.md', readonly artPath = '.private/art/mikiru.webp') {}
+  constructor(readonly runtimePath = '.private/runtime/mikiru.compact.md', readonly artPath = '.private/art/mikiru.webp') {}
   async runtime(signal: AbortSignal): Promise<string> {
     if ((await stat(this.runtimePath)).size > PRIVATE_LIMITS.runtimeBytes) throw new Error('RUNTIME_LIMIT');
     return validateRuntime(await readFile(this.runtimePath, { signal }));

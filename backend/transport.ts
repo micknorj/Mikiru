@@ -45,7 +45,7 @@ export function createHandler(core: Core, allowedOrigin: string) {
       const length = request.headers.get('content-length');
       if (length && (!/^\d+$/.test(length) || Number(length) > LIMITS.BODY_BYTES)) throw new Failure('INVALID_REQUEST', 413);
       let data: unknown;
-      try { data = JSON.parse(await readBoundedText(request, LIMITS.BODY_BYTES)); }
+      try { data = JSON.parse(await readBoundedText(request, LIMITS.BODY_BYTES, signal)); }
       catch (error) { throw new Failure('INVALID_REQUEST', error instanceof Error && error.message === 'BODY_LIMIT' ? 413 : 400); }
       signal.throwIfAborted();
       const response = route === '/api/chat' ? await core.chat(data, signal) : await core.compact(data, signal);

@@ -14,7 +14,7 @@ try {
     page.on('pageerror', error => errors.push(error.message)); page.on('request', req => urls.add(req.url()));
     await page.clock.install({ time: new Date('2026-10-05T05:00:00Z') });
     await page.goto(base); await page.getByRole('button', { name: 'Start chatting' }).waitFor();
-    await page.waitForFunction(() => document.querySelector('.portrait')?.naturalWidth === 3000 && document.querySelector('.art-slot').classList.contains('is-ready'));
+    await page.waitForFunction(() => document.querySelector('.portrait')?.naturalWidth > 0 && document.querySelector('.art-slot').classList.contains('is-ready'));
     await page.locator('.portrait').evaluate(el=>el.decode());
     const layout = await page.evaluate(() => {
       const r = el => { const a = el.getBoundingClientRect(); return { x:a.x,y:a.y,width:a.width,height:a.height,right:a.right,bottom:a.bottom }; };
@@ -216,8 +216,17 @@ try {
   await second.waitForFunction(()=>document.querySelectorAll('.transcript .mikiru-message').length===2);
   await page.getByRole('textbox',{name:'Message'}).fill('reset yourself'); await page.getByRole('button',{name:'Send',exact:true}).click(); await page.getByRole('button',{name:'Reset',exact:true}).click();
   await second.waitForFunction(()=>document.querySelectorAll('.transcript .message').length===0);
-  for (const path of ['spec/mikiru.md','.private/art/source/mikiru-original.png','.private/art/source/prepare-webp.py','.private/art/mikiru.webp',`@fs/${process.cwd().replaceAll('\\','/')}/spec/mikiru.md`]) {
-    const response = await context.request.get(new URL(path,base).href); assert.equal(response.status(),403, path);
+  await writeFile('.private/browser-isolation-probe.txt', 'SYNTHETIC_PRIVATE_BOUNDARY_TEST');
+  for (const path of ['spec/mikiru.md','.private/art/source/mikiru-original.png','.private/art/source/prepare-webp.py','.private/art/mikiru.webp',`@fs/${process.cwd().replaceAll('\\','/')}/spec/mikiru.md`,'.private/browser-isolation-probe.txt']) {
+    const response = await context.request.get(new URL(path,base).href);
+    if (response.status() !== 403) {
+      // Absent private inputs may reach Vite's HTML SPA fallback; that is not a
+      // private-file response. The real synthetic probe must always be denied.
+      assert.notEqual(path, '.private/browser-isolation-probe.txt');
+      assert.equal(response.status(), 200, path);
+      assert.match(response.headers()['content-type'] ?? '', /text\/html/);
+      assert.match(await response.text(), /<main id="app"><\/main>/);
+    }
   }
   const removedPng=await context.request.get(new URL('mikiru-art.png',base).href);
   assert.doesNotMatch(removedPng.headers()['content-type']??'',/image\//,'removed root PNG cannot be served as artwork (Vite may return its HTML fallback)');

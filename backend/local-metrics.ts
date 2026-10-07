@@ -1,9 +1,9 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { appendFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import type { Completion, Provider } from './provider.ts';
+import type { Completion, CompletionInput, Provider } from './provider.ts';
 
-type CallMeasurement = { kind: 'dialogue' | 'state'; latencyMs: number; completed: boolean; usage?: Completion['usage'] };
+type CallMeasurement = { kind: CompletionInput['kind']; latencyMs: number; completed: boolean; usage?: Completion['usage'] };
 export type RequestMeasurement = { recordedAt: string; route: '/api/chat' | '/api/compact'; status: number; latencyMs: number; calls: CallMeasurement[] };
 const elapsed = (start: number) => Math.round((performance.now() - start) * 100) / 100;
 

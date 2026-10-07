@@ -20,7 +20,7 @@ function failureMessage(error: unknown, committing: boolean): string {
   if (committing) return 'Reply could not be saved. Try again.';
   if (error instanceof ApiFailure) {
     switch (error.code) {
-      case 'RATE_LIMITED': return 'Too many requests. Wait a moment, then retry.';
+      case 'RATE_LIMITED': return 'Groq quota reached. Retry later.';
       case 'TIMEOUT': return 'The reply took too long. Try again.';
       case 'NETWORK_ERROR': return 'Connection lost. Try again.';
       case 'MODEL_INVALID_OUTPUT': return 'The reply could not be completed. Try again.';
@@ -42,7 +42,12 @@ export class Controller {
     this.now = deps.now ?? (() => new Date());
     this.online = deps.online ?? (() => navigator.onLine);
   }
-  async initialize(): Promise<void> { this.state = await this.deps.storage.initialize(this.now().toISOString()); this.deps.changed(); }
+  async initialize(): Promise<void> {
+    const epoch = this.epoch;
+    const state = await this.deps.storage.initialize(this.now().toISOString());
+    if (epoch !== this.epoch) return;
+    this.state = state; this.deps.changed();
+  }
   private sleepFade(text: string, createdAt: string): void {
     const attempt = { localId: crypto.randomUUID(), text, createdAt };
     this.sleepAttempts.push(attempt); this.deps.changed();
@@ -82,17 +87,26 @@ export class Controller {
       await this.deps.tabs.exclusive(pending.abortController.signal, async () => {
         let base = await this.deps.storage.read();
         if (!this.matchesInstance(base, pending, epoch)) return;
+        const staged = pending.stagedCompaction;
+        const reuseCompaction = staged?.meta.instanceId === base.meta.instanceId && staged.meta.revision === base.meta.revision;
+        if (reuseCompaction) base = staged;
+        else delete pending.stagedCompaction;
         if (sleepState(base.meta.sleepSeed, this.now()).asleep) { this.pending = null; this.sleepFade(pending.text, pending.createdAt); return; }
         pending.status = 'sending'; this.deps.changed();
-        if (needsCompaction(base, pending.text)) {
+        if (!reuseCompaction && needsCompaction(base, pending.text)) {
           try {
             const range = compactionRange(base);
             const result = await this.deps.api.compact({ instanceId: base.meta.instanceId, baseRevision: base.meta.revision, currentMemory: workingMemory(base.memory), turns: range }, pending.abortController.signal);
             if (!this.alive(pending, epoch)) return;
             base = this.deps.storage.prepareCompaction(base, result, range.at(-1)!.seq, this.now().toISOString());
+            // RAM only, tied to the committed instance/revision. A failed reply
+            // still commits nothing; manual retry need not spend quota again.
+            pending.stagedCompaction = base;
 
-          } catch {
+          } catch (error) {
             if (!this.alive(pending, epoch)) return;
+            // A quota rejection must not immediately spend another request.
+            if (error instanceof ApiFailure && error.code === 'RATE_LIMITED') throw error;
             // Failed compaction changes nothing. Safe raw context may still fit this turn.
           }
 

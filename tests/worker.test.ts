@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, readdir, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { readFile, readdir, mkdir, mkdtemp, writeFile, symlink } from 'node:fs/promises';
 import { resolve, relative } from 'node:path';
 import { createWorker, type WorkerEnv } from '../backend/worker.ts';
 import { fixtureProvider } from '../backend/fixture.ts';
@@ -18,24 +18,25 @@ function http(path: string, method = 'GET', body?: unknown, headers: Record<stri
 }
 const webp = new Uint8Array([82, 73, 70, 70, 8, 0, 0, 0, 87, 69, 66, 80, 86, 80, 56, 32]);
 
-test('Worker uses real Groq adapter through Fetch, keeps two calls and fails closed without secrets/ZDR', async () => {
+test('Worker uses one structured Groq call through Fetch and fails closed without secrets/ZDR', async () => {
   const calls: Record<string, unknown>[] = [];
   const providerCalls: string[] = [];
   const provider = { complete: async (input: Parameters<typeof fixtureProvider.complete>[0]) => { providerCalls.push(input.kind); return fixtureProvider.complete(input); } };
   const worker = createWorker('SYNTHETIC_CHARACTER', { fetcher: async (_url, init) => {
     calls.push(JSON.parse(String(init?.body)));
-    const r = await provider.complete({ kind: calls.length === 1 ? 'dialogue' : 'state', schema: { properties: { relationshipDelta: {} } }, messages: [], signal: new AbortController().signal });
+    const r = await provider.complete({ kind: 'turn', schema: {}, messages: [], signal: new AbortController().signal });
     return Response.json({ choices: [{ message: { content: r.text }, finish_reason: 'stop' }] });
   } });
   const environment = { ...env(), GROQ_API_KEY: 'synthetic-test-key', MIKIRU_ZDR_CONFIRMED: 'true' };
   const result = await worker.fetch(http('/api/chat', 'POST', request()), environment);
-  assert.equal(result.status, 200); assert.deepEqual(providerCalls, ['dialogue', 'state']);
-  assert.equal(calls[0]!.model, 'qwen/qwen3.8-27b'); assert.equal(calls[0]!.response_format, undefined); assert.ok(calls[1]!.response_format);
+  assert.equal(result.status, 200); assert.deepEqual(providerCalls, ['turn']);
+  assert.equal(calls[0]!.model, 'qwen/qwen3.8-27b'); assert.ok(calls[0]!.response_format);
+  assert.equal((calls[0]!.response_format as { json_schema: { name: string } }).json_schema.name, 'mikiru_turn');
   assert.equal(JSON.stringify(await result.json()).includes('SYNTHETIC_CHARACTER'), false);
   for (const missing of [env(), { ...environment, MIKIRU_ZDR_CONFIRMED: 'false' }]) {
     assert.equal((await worker.fetch(http('/api/chat', 'POST', request()), missing)).status, 503);
   }
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 1);
 });
 
 test('Worker artwork streams only fixed ASSETS object with CORS, HEAD, conditional requests and no filename bypass', async () => {
@@ -87,6 +88,7 @@ test('private deployment preparation isolates prompt/artwork and never serialize
 });
 
 test('Worker preparation requires existing WebP and never consumes or converts a source PNG', async () => {
+  await mkdir('.private/test-worker', { recursive: true });
   const directory = await mkdtemp(resolve('.private/test-worker/webp-only-'));
   const runtimePath = relative(process.cwd(), resolve(directory, 'input.md'));
   const artPath = relative(process.cwd(), resolve(directory, 'input.webp'));
@@ -101,6 +103,18 @@ test('Worker preparation requires existing WebP and never consumes or converts a
   await prepareWorker({ target, runtimePath, artPath });
   assert.deepEqual(await readdir(resolve(directory, 'prepared/assets')), ['mikiru.webp']);
   assert.deepEqual(new Uint8Array(await readFile(resolve(directory, 'source.png'))), png, 'maintainer source is preserved and unused');
+});
+
+test('private preparation rejects redirected asset directories before writing deployment inputs', async () => {
+  await mkdir('.private/test-worker', { recursive: true });
+  const directory = await mkdtemp(resolve('.private/test-worker/link-'));
+  const prepared = resolve(directory, 'prepared');
+  const elsewhere = resolve(directory, 'elsewhere');
+  await mkdir(prepared); await mkdir(elsewhere);
+  await symlink(elsewhere, resolve(prepared, 'assets'), process.platform === 'win32' ? 'junction' : 'dir');
+  await assert.rejects(prepareWorker({ target: relative(process.cwd(), prepared), fixture: true, dev: true }), /OUTPUT_LINK_NOT_ALLOWED/);
+  assert.deepEqual(await readdir(elsewhere), []);
+  assert.deepEqual(await readdir(prepared), ['assets'], 'no runtime/config is written on rejected destinations');
 });
 
 test('active runtime/configuration contains no AWS dependencies, R2, retired Cloudflare bindings or automatic Worker deployment', async () => {

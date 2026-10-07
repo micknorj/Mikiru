@@ -26,7 +26,7 @@ export class Api {
         credentials: 'omit', cache: 'no-store', body: JSON.stringify(body), signal: combined,
       });
       let data: unknown;
-      try { data = JSON.parse(await readBoundedText(response, LIMITS.BODY_BYTES)); }
+      try { data = JSON.parse(await readBoundedText(response, LIMITS.BODY_BYTES, combined)); }
       catch (error) {
         combined.throwIfAborted();
         if (!response.ok) throw new ApiFailure(response.status === 429 ? 'RATE_LIMITED' : 'MODEL_UNAVAILABLE');

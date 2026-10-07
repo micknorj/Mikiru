@@ -1,0 +1,3 @@
+// Synthetic 64px neutral ellipse on transparent ground. This is technical test
+// data, not Mikiru artwork; it lets local UI/ASSETS checks run without private files.
+export const artworkFixture = Buffer.from('UklGRnwBAABXRUJQVlA4TG8BAAAvP8APEHVAkiTJUcTPV3cG+tXQlbn6VugIKNu2ne92rFkR0d6SvX0JNlvJRrZXd+wL4B9tJqvbmt4J6H9M6ejriu8Ll/SX2s8iAfuAg+yu+J9i6WIGOFLT4fgEZACTJOLwAaYfYcg0ndN0iKOe4NwCCrlfI5Io3UtVDHon6qeGX0g5NAHFqsYIp68qvrf4FIUB5QRSOK3jMGRJuxuXlAxCDnwZWnEwiniC8u7grRM+2HfrBz1hafYMfQI5j9IJDD0MEtj0sJagKw/nCTx5eEjg28NnguYeZt/BxfNIuHl4SODSo7MENjxaTbh6GCSQ85BKWJo9Q58AyzOoCU9Q3h28dUIzcTDqSAUd8mYMqmOQM5rjOvY7lFCd/Cl7rL6qHmBSWvUqlTt2SeC7ht93Yk6rWEOhg7cw3VToagtLaiSazvE/hJ0t9xz2TicxQ6Tzr5oeo6ksC8hnXPHZPcT2itufVBq6utDXhfPHUr2A/HMCAA==', 'base64');

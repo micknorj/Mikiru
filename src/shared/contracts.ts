@@ -74,6 +74,8 @@ export const replySchema = z.string().min(1).max(LIMITS.REPLY_CHARS).refine(v =>
 export const stateProposalSchema = z.strictObject({
   memoryOps: memoryOpsSchema, relationshipDelta: relationshipProposalSchema, moodDelta: moodDeltaSchema,
 });
+// Provider-only envelope. The HTTP/browser response remains chatResponseSchema.
+export const turnEnvelopeSchema = z.strictObject({ reply: replySchema, ...stateProposalSchema.shape });
 export const statePatchSchema = z.strictObject({
   memoryOps: memoryOpsSchema, relationshipDelta: acceptedRelationshipDeltaSchema, moodDelta: acceptedMoodDeltaSchema,
 });

@@ -25,6 +25,9 @@
   "dependencies": {
     "zod": "4.6.5"
   },
+  "overrides": {
+    "sharp": "0.35.5"
+  },
   "devDependencies": {
     "@types/node": "24.19.1",
     "esbuild": "0.28.1",

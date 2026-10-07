@@ -4,13 +4,13 @@ import assert from 'node:assert/strict';
 import { Core } from '../backend/core.ts';
 import { GroqProvider } from '../backend/providers/groq.ts';
 import { modelConfig } from '../backend/config.ts';
-import { LocalContent } from '../backend/local-content.ts';
 import { createLocalServer } from '../backend/local-server.ts';
 import { LocalMetrics } from '../backend/local-metrics.ts';
 import { newFact, zeroMood } from '../tests/fixtures.ts';
+import { artworkFixture } from '../tests/artwork-fixture.mjs';
 
 // This test substitutes only Groq's HTTP response. The browser still runs the
-// actual UI, API validation, HTTP server, two-pass core and IndexedDB commits.
+// actual UI, API validation, HTTP server, combined core and IndexedDB commits.
 // It never loads a key or sends data to a provider.
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE ?? 'playwright');
@@ -18,7 +18,7 @@ const base = process.env.MIKIRU_PREVIEW_URL ?? 'http://127.0.0.1:5173/';
 const origin = new URL(base).origin;
 const calls = []; const measurements = []; const browserErrors = []; const hosts = new Set();
 let mode = 'success'; let badBackend = false; let networkFailure = false;
-let releaseState; let enteredState;
+let releaseTurn; let enteredTurn;
 const proposal = { memoryOps: [newFact()], relationshipDelta: { familiarity: 1, trust: 1, closeness: 1, significance: 'meaningful' }, moodDelta: { ...zeroMood, positive: 2 } };
 const provider = new GroqProvider(async () => 'LOCAL_TEST_KEY', modelConfig({}), async (url, init) => {
   assert.equal(url, 'https://api.groq.com/openai/v1/chat/completions');
@@ -26,16 +26,15 @@ const provider = new GroqProvider(async () => 'LOCAL_TEST_KEY', modelConfig({}),
   if (mode === 'rate-limit') return new Response('private provider error', { status: 429 });
   const structured = !!body.response_format;
   if (structured && mode === 'gated') {
-    const gate = new Promise(resolve => { releaseState = resolve; });
-    enteredState(); await gate;
+    const gate = new Promise(resolve => { releaseTurn = resolve; });
+    enteredTurn(); await gate;
     init.signal.throwIfAborted();
   }
-  const text = structured ? mode === 'invalid-state' ? 'invalid JSON' : JSON.stringify(proposal) : 'Local test reply. <b>Keep this literal.</b>';
+  const text = mode === 'invalid-state' ? 'invalid JSON' : JSON.stringify({ ...proposal, reply: 'Local test reply. <b>Keep this literal.</b>' });
   return new Response(JSON.stringify({ choices: [{ message: { content: text }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 40 } }));
 });
 const metrics = new LocalMetrics(async measurement => { measurements.push(measurement); });
-const localContent = new LocalContent();
-const core = new Core(metrics.provider(provider), { runtime: async () => 'PRIVATE_TEST_RUNTIME', artwork: signal => localContent.artwork(signal) });
+const core = new Core(metrics.provider(provider), { runtime: async () => 'PRIVATE_TEST_RUNTIME', artwork: async () => new Response(artworkFixture, { headers: { 'Content-Type': 'image/webp', ETag: '"synthetic-art"' } }) });
 const server = createLocalServer(core, origin, metrics);
 server.listen(0, '127.0.0.1'); await once(server, 'listening');
 const api = `http://127.0.0.1:${server.address().port}`;
@@ -53,7 +52,7 @@ const input = page => page.getByRole('textbox', { name: 'Message' });
 const send = async (page, text) => { await input(page).fill(text); await input(page).press('Enter'); };
 const replies = async (page, count) => page.waitForFunction(n => document.querySelectorAll('.mikiru-message').length === n, count);
 const reset = async page => { await send(page, 'reset yourself'); await page.getByRole('button', { name: 'Reset', exact: true }).click(); await page.waitForFunction(() => document.querySelectorAll('.transcript .message').length === 0 && !document.querySelector('.input').disabled); };
-const gateNextState = () => { mode = 'gated'; return new Promise(resolve => { enteredState = resolve; }); };
+const gateNextTurn = () => { mode = 'gated'; return new Promise(resolve => { enteredTurn = resolve; }); };
 try {
   const context = await browser.newContext({ timezoneId: 'Asia/Bangkok', reducedMotion: 'reduce' });
   await context.route('**/api/**', async route => {
@@ -84,11 +83,11 @@ try {
   await page.getByRole('button', { name: 'Continue chatting' }).click();
   await replies(page, 1); assert.deepEqual(await readState(page), state);
 
-  let entered = gateNextState(); await send(page, 'Do not commit before the state pass.'); await entered;
+  let entered = gateNextTurn(); await send(page, 'Do not commit before the complete turn.'); await entered;
   assert.deepEqual(await readState(page), state);
   assert.equal(await page.locator('.pending-message .read-state').count(), 0);
   assert.equal(await page.locator('.mikiru-message').count(), 1);
-  releaseState(); mode = 'success'; await replies(page, 2); state = await readState(page);
+  releaseTurn(); mode = 'success'; await replies(page, 2); state = await readState(page);
 
   for (const failure of ['invalid-state', 'rate-limit', 'malformed-backend', 'network']) {
     mode = failure; badBackend = failure === 'malformed-backend'; networkFailure = failure === 'network';
@@ -96,7 +95,7 @@ try {
     await page.getByRole('button', { name: 'Retry message', exact: true }).waitFor();
     assert.deepEqual(await readState(page), state, failure);
     assert.equal(await page.locator('.pending-message .read-state').count(), 0);
-    assert.equal(await page.locator('.status').innerText(), failure === 'rate-limit' ? 'Too many requests. Wait a moment, then retry.' : failure === 'network' ? 'Connection lost. Try again.' : 'The reply could not be completed. Try again.');
+    assert.equal(await page.locator('.status').innerText(), failure === 'rate-limit' ? 'Groq quota reached. Retry later.' : failure === 'network' ? 'Connection lost. Try again.' : 'The reply could not be completed. Try again.');
     mode = 'success'; badBackend = false; networkFailure = false;
     const placement=await page.locator('.failed-reply').evaluate(el=>{const bubble=el.querySelector('.message-bubble').getBoundingClientRect(),retry=el.querySelector('.retry').getBoundingClientRect();return {right:retry.left>=bubble.right+7,sameRow:retry.top<bubble.bottom&&retry.bottom>bubble.top,diameter:retry.width,height:retry.height,read:el.querySelector('.read-state')!==null};});
     assert.deepEqual(placement,{right:true,sameRow:true,diameter:44,height:44,read:false});
@@ -106,13 +105,13 @@ try {
     state = committed;
   }
 
-  entered = gateNextState(); await send(page, 'Discard this pending turn on reset.'); await entered;
+  entered = gateNextTurn(); await send(page, 'Discard this pending turn on reset.'); await entered;
   const oldInstance = state.meta.instanceId; const callsBeforeReset = calls.length;
   await reset(page);
   state = await readState(page); assert.notEqual(state.meta.instanceId, oldInstance);
   assert.equal(state.meta.revision, 0); assert.deepEqual(state.turns, []); assert.deepEqual(state.memory.items, []); assert.equal(state.relationship.familiarity, 0);
   assert.equal(calls.length, callsBeforeReset, 'reset command remains application-level');
-  releaseState(); mode = 'success'; await page.waitForTimeout(150);
+  releaseTurn(); mode = 'success'; await page.waitForTimeout(150);
   assert.deepEqual(await readState(page), state, 'late response cannot revive erased state');
 
   await page.clock.setSystemTime(new Date('2026-10-05T19:00:00Z'));
@@ -130,8 +129,8 @@ try {
   await Promise.all([send(page, 'First tab turn.'), send(second, 'Second tab turn.')]);
   await replies(page, 3); await replies(second, 3);
   assert.deepEqual(await readState(page), await readState(second));
-  assert.equal(calls.length, beforeTabs + 4);
-  const recentLengths = calls.slice(beforeTabs).filter(c => !c.response_format).map(c => JSON.parse(c.messages[1].content).recentConversation.length);
+  assert.equal(calls.length, beforeTabs + 2);
+  const recentLengths = calls.slice(beforeTabs).map(c => JSON.parse(c.messages[1].content).recentConversation.length);
   assert.deepEqual(recentLengths, [1, 2], 'Web Lock forces the waiting tab to use newly committed history');
   await reset(second); await replies(page, 0);
   assert.deepEqual(await readState(page), await readState(second));
@@ -140,8 +139,8 @@ try {
     assert.equal(JSON.stringify(measurement).includes('PRIVATE_TEST_RUNTIME'), false);
     assert.equal(JSON.stringify(measurement).includes('Pat'), false);
   }
-  console.log('Local browser flow passed: separate Groq HTTP/state calls, literal text, atomic commit, real IndexedDB refresh/state, failed state/provider/network/malformed responses, safe retry, reset cancellation, sleep non-delivery, and real multi-tab Web Locks/BroadcastChannel. No live provider calls.');
+  console.log('Local browser flow passed: single combined Groq HTTP call, literal text, atomic commit, real IndexedDB refresh/state, failed state/provider/network/malformed responses, safe retry, reset cancellation, sleep non-delivery, and real multi-tab Web Locks/BroadcastChannel. No live provider calls.');
   await context.close();
 } finally {
-  releaseState?.(); await browser.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
+  releaseTurn?.(); await browser.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
 }

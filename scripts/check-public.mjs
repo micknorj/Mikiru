@@ -3,7 +3,7 @@ import { join } from 'node:path';
 const banned = ["Mick's Motions", 'mikiru-v2', 'Mikiru v2', '@cf/', 'turnstile', 'PRIVATE_TEST_RUNTIME', 'LOCAL_TECHNICAL_FIXTURE'];
 // Optional maintainer inputs improve local scanning; CI/public builds need none of them.
 const privateFragments = [];
-for (const path of ['.private/runtime/mikiru.md', 'spec/mikiru.md', 'spec/MIKIRU_LORE_SUPPLEMENT.md']) {
+for (const path of ['.private/runtime/mikiru.md', '.private/runtime/mikiru.compact.md', 'spec/mikiru.md', 'spec/MIKIRU_LORE_SUPPLEMENT.md']) {
   try { privateFragments.push(...(await readFile(path, 'utf8')).split(/\r?\n/).map(s => s.trim()).filter(s => s.length >= 100)); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
 }

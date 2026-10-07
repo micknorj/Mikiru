@@ -1,3 +1,4 @@
+import type { Snapshot } from '../shared/contracts.ts';
 export type PendingMessage = {
   localId: string;
   instanceId: string;
@@ -6,6 +7,7 @@ export type PendingMessage = {
   descriptions: boolean;
   status: 'waiting_for_lock' | 'sending' | 'failed';
   abortController: AbortController;
+  stagedCompaction?: Snapshot;
 };
 export type SleepAttempt = { localId: string; text: string; createdAt: string };
 

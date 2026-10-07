@@ -21,7 +21,7 @@ import { fixtureProvider } from '${fixtureModule}';
 export default createWorker('LOCAL_TECHNICAL_FIXTURE', { fetcher: async (_url, init) => {
   if (init.headers.Authorization !== 'Bearer LOCAL_TEST_KEY') throw new Error('SECRET_NOT_LOADED');
   const body = JSON.parse(init.body);
-  const result = await fixtureProvider.complete({ kind: body.response_format ? 'state' : 'dialogue',
+  const result = await fixtureProvider.complete({ kind: body.response_format?.json_schema.name === 'mikiru_turn' ? 'turn' : 'state',
     schema: body.response_format?.json_schema.schema, messages: [], signal: init.signal });
   return Response.json({ choices: [{ message: { content: result.text }, finish_reason: 'stop' }] });
 } });\n`);
@@ -43,9 +43,9 @@ try {
   assert.equal(response.status, 200, 'required process secret reaches real Groq adapter, with all provider HTTP intercepted inside the local Worker');
   const accepted = await response.json(); assert.equal(accepted.reply, '[Local fixture] The technical chat flow is working.'); assert.ok(accepted.acceptedStatePatch);
   const artwork = await fetch(`${base}/api/art/mikiru`, { headers: origin });
-  assert.ok([200, 404].includes(artwork.status));
-  if (artwork.ok) assert.equal(artwork.headers.get('content-type'), 'image/webp');
+  assert.equal(artwork.status, 200, 'synthetic fixture exercises the real static-asset binding without private artwork');
+  assert.equal(artwork.headers.get('content-type'), 'image/webp');
   await artwork.body?.cancel();
   assert.equal((await fetch(`${base}/mikiru.webp`, { headers: origin })).status, 404);
-  console.log('Local Wrangler passed required process-secret loading, real Worker/Groq adapter two-pass validation, static artwork and direct-filename isolation. No live inference.');
+  console.log('Local Wrangler passed required process-secret loading, single structured Worker/Groq turn validation, static artwork and direct-filename isolation. No live inference.');
 } finally { if (child.exitCode === null && child.signalCode === null) { child.kill('SIGINT'); await once(child, 'exit').catch(() => {}); } }

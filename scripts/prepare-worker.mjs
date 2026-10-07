@@ -1,11 +1,17 @@
-import { readFile, writeFile, mkdir, realpath, readdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, realpath, readdir, lstat } from 'node:fs/promises';
 import { resolve, relative, join, isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { validateRuntime, validateArtwork } from '../backend/private-content.ts';
+import { artworkFixture } from '../tests/artwork-fixture.mjs';
 
 const root = resolve(import.meta.dirname, '..');
+async function rejectLink(path) {
+  try {
+    if ((await lstat(path)).isSymbolicLink()) throw new Error('OUTPUT_LINK_NOT_ALLOWED');
+  } catch (error) { if (error.code !== 'ENOENT') throw error; }
+}
 export async function prepareWorker({ fixture = false, dev = false, target = '.private/worker',
-  runtimePath = '.private/runtime/mikiru.md', artPath = '.private/art/mikiru.webp', env = process.env } = {}) {
+  runtimePath = '.private/runtime/mikiru.compact.md', artPath = '.private/art/mikiru.webp', env = process.env } = {}) {
   const directory = resolve(root, target);
   const privateRoot = resolve(root, '.private');
   const child = relative(privateRoot, directory);
@@ -13,11 +19,17 @@ export async function prepareWorker({ fixture = false, dev = false, target = '.p
   await mkdir(directory, { recursive: true });
   const actualChild = relative(await realpath(privateRoot), await realpath(directory));
   if (actualChild.startsWith('..') || isAbsolute(actualChild)) throw new Error('OUTPUT_MUST_BE_PRIVATE');
+  const assets = join(directory, 'assets');
+  // Check every destination before writing any private material. Existing links/junctions
+  // must never redirect deployment inputs into a public directory or source file.
+  await rejectLink(assets);
+  for (const path of [join(assets, 'mikiru.webp'), ...['runtime.txt', 'entry.ts', 'wrangler.json'].map(name => join(directory, name))]) {
+    await rejectLink(path);
+  }
   const runtime = fixture ? 'LOCAL_TECHNICAL_FIXTURE' : validateRuntime(await readFile(resolve(root, runtimePath)));
   let artwork;
-  try { artwork = validateArtwork(await readFile(resolve(root, artPath))); }
+  try { artwork = fixture ? artworkFixture : validateArtwork(await readFile(resolve(root, artPath))); }
   catch (error) { if (error.code !== 'ENOENT' || !dev) throw new Error('PRIVATE_WEBP_REQUIRED'); }
-  const assets = join(directory, 'assets');
   await mkdir(assets, { recursive: true });
   if ((await readdir(assets)).some(name => name !== 'mikiru.webp')) throw new Error('ASSETS_DIRECTORY_MUST_CONTAIN_ONLY_WEBP');
   if (artwork) await writeFile(join(assets, 'mikiru.webp'), artwork);

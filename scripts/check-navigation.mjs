@@ -141,6 +141,20 @@ try {
     assert.equal(calls, sleepCalls);
     await page.evaluate(() => { dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })); dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })); });
     await assertLanding(page, 'Start chatting'); assert.deepEqual(await readState(page), blank);
+    // Invalid local data is recoverable by explicit Reset. The startup-only error
+    // must disappear afterward, including when returning to the landing page.
+    await page.evaluate(async () => {
+      const db = await new Promise(resolve => { const r=indexedDB.open('mikiru'); r.onsuccess=()=>resolve(r.result); });
+      const tx=db.transaction('memory','readwrite'); tx.objectStore('memory').put({version:1,items:'SYNTHETIC_CORRUPT_DATA'},'current');
+      await new Promise(resolve=>tx.oncomplete=resolve); db.close();
+    });
+    await page.reload(); await releaseStorage(); await assertLanding(page,'Start chatting');
+    assert.equal(await page.locator('.landing-error').isVisible(),true);
+    await page.getByRole('button',{name:'Start chatting'}).click(); await send(page,'reset yourself');
+    await page.getByRole('button',{name:'Reset',exact:true}).click();
+    await page.waitForFunction(()=>!document.querySelector('.input').disabled&&document.querySelector('.status').textContent==='');
+    await page.getByRole('button',{name:'Mikiru Home'}).click(); await assertLanding(page,'Start chatting');
+    assert.equal(await page.locator('.landing-error').isVisible(),false,'successful reset clears startup error presentation');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     assert.deepEqual(errors, []); assert.ok([...hosts].every(host => host === '127.0.0.1'));
     await page.screenshot({ path: `.private/screenshots/navigation-${appearance}-${width}-landing.png` });

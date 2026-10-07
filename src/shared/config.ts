@@ -9,8 +9,9 @@ export const LIMITS = {
   MAX_MEMORY_OPS: 24,
   MEMORY_TEXT_CHARS: 512,
   INPUT_DATA_HARD_MAX: 16_672,
-  CONTEXT_TARGET: 12_000,
-  COMPACTION_TRIGGER: 8_400,
+  // Byte-estimated data budgets, not guarantees about provider token quotas.
+  CONTEXT_TARGET: 6_000,
+  COMPACTION_TRIGGER: 6_000,
   API_TIMEOUT_MS: 50_000,
   JUST_WOKE_WINDOW_MINUTES: 30,
   SLEEP_FADE_MS: 1_600,

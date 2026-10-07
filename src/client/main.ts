@@ -156,6 +156,7 @@ const resetModal = createModal(dialog, { dismissOnBackdrop: true });
 const storage = new Storage();
 let controller: Controller | null = null;
 let historyReady = false; let warning = ''; let fatal = '';
+let landingError: HTMLParagraphElement | undefined;
 const backendWarning = api.base ? '' : 'Chat is unavailable right now.';
 let renderedKey = '';
 // UI-only nodes preserve outgoing motion/fade progress across pending status and tab updates.
@@ -229,6 +230,7 @@ function failedReply(): HTMLElement {
 }
 function render(): void {
   if (!controller) return;
+  if (landingError) { landingError.textContent = fatal; landingError.hidden = !fatal; }
 
   enter.textContent = landingAction(controller.state);
   enter.style.visibility = historyReady ? '' : 'hidden';
@@ -341,12 +343,13 @@ try {
   await controller.initialize();
   historyReady = true; render();
   if (navigator.storage?.estimate) {
-    const estimate = await navigator.storage.estimate();
+    // Size reporting is advisory; its failure must not disable valid IndexedDB data.
+    const estimate = await navigator.storage.estimate().catch((): StorageEstimate => ({}));
     if ((estimate.usage ?? 0) >= LIMITS.STORAGE_WARNING_BYTES) { warning = 'Browser storage is getting large. History remains until you reset or clear browser data.'; render(); }
   }
 } catch {
   fatal = controller ? 'Local data could not be opened. Send "reset yourself" to clear Mikiru data.' : 'Use a current browser with IndexedDB, Web Locks and BroadcastChannel enabled.';
-  landing.append(node('p', 'status landing-error', fatal));
+  landingError = node('p', 'status landing-error', fatal); landing.append(landingError);
   if (!controller) enter.disabled = true;
 } finally {
   historyReady = true; render();

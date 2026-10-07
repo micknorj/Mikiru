@@ -8,6 +8,14 @@ const request = <T>(r: IDBRequest<T>) => new Promise<T>((resolve, reject) => { r
 function done(tx: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onabort = () => reject(tx.error ?? new Error('TRANSACTION_ABORTED')); tx.onerror = () => { /* onabort owns failure */ }; });
 }
+async function execute<T>(tx: IDBTransaction, work: () => Promise<T>): Promise<T> {
+  const complete = done(tx);
+  try { const result = await work(); await complete; return result; }
+  catch (error) {
+    try { tx.abort(); } catch { /* An IDB request may already have aborted it. */ }
+    await complete.catch(() => undefined); throw error;
+  }
+}
 
 export class Storage {
   private db: IDBDatabase | null = null;
@@ -29,25 +37,23 @@ export class Storage {
   async initialize(now = new Date().toISOString()): Promise<Snapshot> {
     const db = await this.open();
     const tx = db.transaction([...STORES], 'readwrite');
-    const complete = done(tx);
-    const existing = await request(tx.objectStore('meta').get(SINGLE));
-    if (!existing) {
-      tx.objectStore('meta').put({ schemaVersion: 1, instanceId: crypto.randomUUID(), revision: 0, createdAt: now, lastSuccessfulConversationAt: null, compactedThroughSeq: 0, sleepSeed: crypto.randomUUID() }, SINGLE);
-      tx.objectStore('characterState').put({ relationship: { familiarity: 0, trust: 0, closeness: 0, stage: 'stranger' }, mood: initialMood(now) }, SINGLE);
-      tx.objectStore('memory').put({ version: 1, items: [] }, SINGLE);
-    }
-    await complete;
+    await execute(tx, async () => {
+      const existing = await request(tx.objectStore('meta').get(SINGLE));
+      if (!existing) {
+        tx.objectStore('meta').put({ schemaVersion: 1, instanceId: crypto.randomUUID(), revision: 0, createdAt: now, lastSuccessfulConversationAt: null, compactedThroughSeq: 0, sleepSeed: crypto.randomUUID() }, SINGLE);
+        tx.objectStore('characterState').put({ relationship: { familiarity: 0, trust: 0, closeness: 0, stage: 'stranger' }, mood: initialMood(now) }, SINGLE);
+        tx.objectStore('memory').put({ version: 1, items: [] }, SINGLE);
+      }
+    });
     return this.read();
   }
   async read(): Promise<Snapshot> {
     const db = await this.open();
     const tx = db.transaction([...STORES], 'readonly');
-    const complete = done(tx);
-    const [meta, turns, memory, character] = await Promise.all([
+    const [meta, turns, memory, character] = await execute(tx, () => Promise.all([
       request(tx.objectStore('meta').get(SINGLE)), request(tx.objectStore('turns').getAll()),
       request(tx.objectStore('memory').get(SINGLE)), request(tx.objectStore('characterState').get(SINGLE)),
-    ]);
-    await complete;
+    ]));
     if (!character || typeof character !== 'object') throw new Error('INVALID_DATABASE_STATE');
     const c = character as { relationship: unknown; mood: unknown };
     const state = { meta: metaSchema.parse(meta), turns: turns.map(t => turnSchema.parse(t)), memory: memorySchema.parse(memory), relationship: relationshipSchema.parse(c.relationship), mood: moodSchema.parse(c.mood) };
@@ -59,16 +65,11 @@ export class Storage {
   private async mutate(instanceId: string, revision: number | null, work: (tx: IDBTransaction, meta: Snapshot['meta']) => void): Promise<void> {
     const db = await this.open();
     const tx = db.transaction([...STORES], 'readwrite');
-    const complete = done(tx);
-    try {
+    await execute(tx, async () => {
       const meta = metaSchema.parse(await request(tx.objectStore('meta').get(SINGLE)));
       if (meta.instanceId !== instanceId || (revision !== null && meta.revision !== revision)) throw new Error('STALE_INSTANCE_OR_REVISION');
       work(tx, meta);
-    } catch (error) {
-      try { tx.abort(); } catch { /* A failing IDB request may already have aborted it. */ }
-      await complete.catch(() => undefined); throw error;
-    }
-    await complete;
+    });
   }
   async commitTurn(base: Snapshot, response: ChatResponse, user: { id: string; text: string; createdAt: string }, decayedMood: Snapshot['mood'], now: string): Promise<Snapshot> {
     const r = chatResponseSchema.parse(response);
