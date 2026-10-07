@@ -70,6 +70,29 @@ test('Fetch boundary rejects invalid UTF-8 and streamed oversized input before i
   assert.equal(calls, 0);
 });
 
+test('request cancellation while reading input is sanitized as unavailable, not malformed input', async () => {
+  let calls = 0; let cancelled = false; const owner = new AbortController();
+  const handler = createHandler(new Core({ complete: async () => { calls++; throw new Error(); } }, { runtime: async () => 'SYNTHETIC_CHARACTER', artwork: async () => null }), origin);
+  const body = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new TextEncoder().encode('{')); }, cancel() { cancelled = true; } });
+  const reading = handler(new Request('https://worker.example/api/chat', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body, duplex: 'half', signal: owner.signal } as RequestInit));
+  owner.abort(); const result = await reading;
+  assert.equal(result.status, 503); assert.equal((await result.json()).error.code, 'MODEL_UNAVAILABLE');
+  assert.equal(cancelled, true); assert.equal(calls, 0);
+});
+
+test('artwork cleanup failures or stalls cannot replace HEAD, conditional or missing-asset status', { timeout: 1000 }, async () => {
+  const worker = createWorker('SYNTHETIC_CHARACTER', { provider: fixtureProvider });
+  const stream = () => new ReadableStream({ cancel() { throw new Error('PRIVATE_CLEANUP_ERROR'); } });
+  const environment = env(async () => new Response(stream(), { headers: { 'Content-Type': 'image/webp', ETag: '"test-art"' } }));
+  const head = await worker.fetch(http('/api/art/mikiru', 'HEAD'), environment);
+  assert.equal(head.status, 200); assert.equal(await head.text(), '');
+  assert.equal((await worker.fetch(http('/api/art/mikiru', 'GET', undefined, { 'If-None-Match': '"test-art"' }), environment)).status, 304);
+  assert.equal((await worker.fetch(http('/api/art/mikiru'), env(async () => new Response(stream(), { status: 404 })))).status, 404);
+  const stalled = () => new ReadableStream({ cancel() { return new Promise<void>(() => {}); } });
+  assert.equal((await worker.fetch(http('/api/art/mikiru', 'HEAD'), env(async () => new Response(stalled(), { headers: { 'Content-Type': 'image/webp' } })))).status, 200);
+  assert.equal((await worker.fetch(http('/api/art/mikiru'), env(async () => new Response(stalled(), { status: 404 })))).status, 404);
+});
+
 test('private deployment preparation isolates prompt/artwork and never serializes credentials', async () => {
   await mkdir('.private/test-worker', { recursive: true });
   const directory = await mkdtemp(resolve('.private/test-worker/run-'));
@@ -115,6 +138,16 @@ test('private preparation rejects redirected asset directories before writing de
   await assert.rejects(prepareWorker({ target: relative(process.cwd(), prepared), fixture: true, dev: true }), /OUTPUT_LINK_NOT_ALLOWED/);
   assert.deepEqual(await readdir(elsewhere), []);
   assert.deepEqual(await readdir(prepared), ['assets'], 'no runtime/config is written on rejected destinations');
+});
+
+test('private preparation rejects linked parent directories before even creating the output', async () => {
+  await mkdir('.private/test-worker', { recursive: true });
+  const directory = await mkdtemp(resolve('.private/test-worker/parent-link-'));
+  const elsewhere = resolve(directory, 'elsewhere'); await mkdir(elsewhere);
+  const redirected = resolve(directory, 'redirected');
+  await symlink(elsewhere, redirected, process.platform === 'win32' ? 'junction' : 'dir');
+  await assert.rejects(prepareWorker({ target: relative(process.cwd(), resolve(redirected, 'prepared')), fixture: true, dev: true }), /OUTPUT_LINK_NOT_ALLOWED/);
+  assert.deepEqual(await readdir(elsewhere), [], 'no private output or directory may be created through a parent link');
 });
 
 test('active runtime/configuration contains no AWS dependencies, R2, retired Cloudflare bindings or automatic Worker deployment', async () => {

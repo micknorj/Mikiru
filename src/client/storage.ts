@@ -20,20 +20,29 @@ async function execute<T>(tx: IDBTransaction, work: () => Promise<T>): Promise<T
 export class Storage {
   private db: IDBDatabase | null = null;
   private opening: Promise<IDBDatabase> | null = null;
+  private generation = 0;
   constructor(private readonly factory: IDBFactory = indexedDB) {}
   private open(): Promise<IDBDatabase> {
     if (this.db) return Promise.resolve(this.db);
     if (this.opening) return this.opening;
-    this.opening = new Promise<IDBDatabase>((resolve, reject) => {
+    const generation = this.generation;
+    let blocked = false;
+    const opening = new Promise<IDBDatabase>((resolve, reject) => {
       const r = this.factory.open(DB_NAME, 1);
       r.onupgradeneeded = () => { for (const name of STORES) if (!r.result.objectStoreNames.contains(name)) r.result.createObjectStore(name, name === 'turns' ? { keyPath: 'seq' } : undefined); };
-      r.onsuccess = () => { this.db = r.result; this.db.onversionchange = () => this.close(); resolve(r.result); };
+      r.onsuccess = () => {
+        // Closing a tab/reset can precede the asynchronous open result. Never
+        // retain a connection owned by an invalidated or rejected opening.
+        if (generation !== this.generation || blocked) { r.result.close(); reject(new Error('DATABASE_CLOSED')); return; }
+        this.db = r.result; this.db.onversionchange = () => this.close(); resolve(r.result);
+      };
       r.onerror = () => reject(r.error);
-      r.onblocked = () => reject(new Error('DATABASE_BLOCKED'));
-    }).finally(() => { this.opening = null; });
-    return this.opening;
+      r.onblocked = () => { blocked = true; reject(new Error('DATABASE_BLOCKED')); };
+    }).finally(() => { if (this.opening === opening) this.opening = null; });
+    this.opening = opening;
+    return opening;
   }
-  close(): void { this.db?.close(); this.db = null; }
+  close(): void { this.generation++; this.db?.close(); this.db = null; this.opening = null; }
   async initialize(now = new Date().toISOString()): Promise<Snapshot> {
     const db = await this.open();
     const tx = db.transaction([...STORES], 'readwrite');

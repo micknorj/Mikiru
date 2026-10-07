@@ -155,7 +155,7 @@ const resetModal = createModal(dialog, { dismissOnBackdrop: true });
 
 const storage = new Storage();
 let controller: Controller | null = null;
-let historyReady = false; let warning = ''; let fatal = '';
+let historyReady = false; let warning = ''; let fatal = ''; let entryEpoch = 0;
 let landingError: HTMLParagraphElement | undefined;
 const backendWarning = api.base ? '' : 'Chat is unavailable right now.';
 let renderedKey = '';
@@ -324,33 +324,39 @@ cancelReset.onclick = () => resetModal.close();
 dialog.addEventListener('close', () => { if (!input.disabled) input.focus({ preventScroll: true }); });
 confirmReset.onclick = () => {
   if (dialog.classList.contains('is-closing') || controller?.resetting) return;
+  const epoch = ++entryEpoch;
   resetModal.close(); input.value = ''; resizeInput(); warning = ''; fatal = '';
-  void controller?.reset();
+  void controller?.reset().finally(() => { if (epoch === entryEpoch) { historyReady = true; render(); } });
 };
 window.addEventListener('resize', resizeInput);
 window.addEventListener('offline', render); window.addEventListener('online', render);
-window.addEventListener('pagehide', () => { controller?.abort(); storage.close(); });
+window.addEventListener('pagehide', () => { entryEpoch++; controller?.abort(); storage.close(); });
 window.addEventListener('pageshow', event => {
   if (!event.persisted || !controller) return;
+  const epoch = entryEpoch;
   // A browser back/forward-cache entry is also Home; refresh only authoritative local data.
   historyReady = false; void navigation.show('landing');
-  void controller.initialize().catch(() => { fatal = 'Local data could not be opened. Send "reset yourself" to clear Mikiru data.'; })
-    .finally(() => { historyReady = true; render(); });
+  void controller.initialize().then(() => { if (epoch === entryEpoch) fatal = ''; })
+    .catch(() => { if (epoch === entryEpoch) fatal = 'Local data could not be opened. Send "reset yourself" to clear Mikiru data.'; })
+    .finally(() => { if (epoch === entryEpoch) { historyReady = true; render(); } });
 });
+const initialEntry = entryEpoch;
 try {
   const tabs = new MultiTab(notice => { void controller?.notice(notice); });
   controller = new Controller({ storage, api, tabs, changed: render, descriptions: () => settings.descriptions });
   await controller.initialize();
-  historyReady = true; render();
-  if (navigator.storage?.estimate) {
+  if (initialEntry === entryEpoch) { historyReady = true; render(); }
+  if (initialEntry === entryEpoch && navigator.storage?.estimate) {
     // Size reporting is advisory; its failure must not disable valid IndexedDB data.
     const estimate = await navigator.storage.estimate().catch((): StorageEstimate => ({}));
-    if ((estimate.usage ?? 0) >= LIMITS.STORAGE_WARNING_BYTES) { warning = 'Browser storage is getting large. History remains until you reset or clear browser data.'; render(); }
+    if (initialEntry === entryEpoch && (estimate.usage ?? 0) >= LIMITS.STORAGE_WARNING_BYTES) { warning = 'Browser storage is getting large. History remains until you reset or clear browser data.'; render(); }
   }
 } catch {
-  fatal = controller ? 'Local data could not be opened. Send "reset yourself" to clear Mikiru data.' : 'Use a current browser with IndexedDB, Web Locks and BroadcastChannel enabled.';
-  landingError = node('p', 'status landing-error', fatal); landing.append(landingError);
-  if (!controller) enter.disabled = true;
+  if (initialEntry === entryEpoch) {
+    fatal = controller ? 'Local data could not be opened. Send "reset yourself" to clear Mikiru data.' : 'Use a current browser with IndexedDB, Web Locks and BroadcastChannel enabled.';
+    landingError = node('p', 'status landing-error', fatal); landing.append(landingError);
+    if (!controller) enter.disabled = true;
+  }
 } finally {
-  historyReady = true; render();
+  if (initialEntry === entryEpoch) { historyReady = true; render(); }
 }

@@ -16,6 +16,13 @@ export async function prepareWorker({ fixture = false, dev = false, target = '.p
   const privateRoot = resolve(root, '.private');
   const child = relative(privateRoot, directory);
   if (!child || child.startsWith('..') || isAbsolute(child)) throw new Error('OUTPUT_MUST_BE_PRIVATE');
+  // Check ancestors before mkdir: even a subsequently rejected destination
+  // must not create directories through a junction into a public location.
+  await rejectLink(privateRoot);
+  let ancestor = privateRoot;
+  for (const part of child.split(/[\\/]/)) {
+    ancestor = join(ancestor, part); await rejectLink(ancestor);
+  }
   await mkdir(directory, { recursive: true });
   const actualChild = relative(await realpath(privateRoot), await realpath(directory));
   if (actualChild.startsWith('..') || isAbsolute(actualChild)) throw new Error('OUTPUT_MUST_BE_PRIVATE');

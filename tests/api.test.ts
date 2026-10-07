@@ -6,6 +6,16 @@ import { LIMITS } from '../src/shared/config.ts';
 
 const base = new URL('http://127.0.0.1:8787/');
 const signal = () => new AbortController().signal;
+
+test('429 headers are enough even when the error body stalls or fails cleanup', async () => {
+  let cancelled = false;
+  const api = new Api(base, async () => new Response(new ReadableStream({ cancel() { cancelled = true; throw new Error('PRIVATE_CLEANUP_ERROR'); } }), { status: 429 }), 20);
+  const keepAlive = setTimeout(() => {}, 500);
+  try {
+    await assert.rejects(api.chat(request(), signal()), (e: unknown) => e instanceof ApiFailure && e.code === 'RATE_LIMITED');
+    assert.equal(cancelled, true);
+  } finally { clearTimeout(keepAlive); }
+});
 test('API preserves rate-limit/service errors even when an intermediary returns HTML or an empty body', async () => {
   for (const [status, body, code] of [[429, '<html>slow down</html>', 'RATE_LIMITED'], [503, '', 'MODEL_UNAVAILABLE'], [429, '{"unexpected":true}', 'RATE_LIMITED']] as const) {
     const api = new Api(base, async () => new Response(body, { status }));

@@ -25,11 +25,11 @@ export function createWorker(runtime: string, options: { provider?: Provider; fe
           if (!env.ASSETS) return null;
           // Always address the one prepared asset; request paths never reach the binding directly.
           const asset = await env.ASSETS.fetch(new Request(new URL('/mikiru.webp', request.url), { signal }));
-          if (asset.status === 404) { await asset.body?.cancel(); return null; }
+          if (asset.status === 404) { void asset.body?.cancel().catch(() => {}); return null; }
           const length = asset.headers.get('content-length');
           if (!asset.ok || asset.headers.get('content-type')?.split(';')[0] !== 'image/webp' ||
               (length !== null && (!/^\d+$/.test(length) || Number(length) > PRIVATE_LIMITS.artBytes))) {
-            await asset.body?.cancel(); throw new Failure('INTERNAL_ERROR', 503);
+            void asset.body?.cancel().catch(() => {}); throw new Failure('INTERNAL_ERROR', 503);
           }
           return asset;
         },

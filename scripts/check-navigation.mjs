@@ -141,6 +141,40 @@ try {
     assert.equal(calls, sleepCalls);
     await page.evaluate(() => { dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })); dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })); });
     await assertLanding(page, 'Start chatting'); assert.deepEqual(await readState(page), blank);
+    // A transient BFCache reopen failure must clear after a successful reopen.
+    await page.evaluate(() => {
+      dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+      const open = indexedDB.open.bind(indexedDB);
+      indexedDB.open = (...args) => { indexedDB.open = open; throw new Error('SYNTHETIC_REOPEN_FAILURE'); };
+      dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    });
+    await page.waitForFunction(() => document.querySelector('.status').textContent.includes('Local data could not be opened'));
+    await page.evaluate(() => {
+      dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+      dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    });
+    await page.waitForFunction(() => document.querySelector('.status').textContent === '');
+    await assertLanding(page, 'Start chatting'); assert.deepEqual(await readState(page), blank);
+    // A rejected old reopen must not overwrite a newer successful page entry.
+    await page.evaluate(() => {
+      dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+      const open = indexedDB.open.bind(indexedDB);
+      window.__staleOpen = {};
+      indexedDB.open = () => { indexedDB.open = open; return window.__staleOpen; };
+      dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    });
+    await page.evaluate(() => {
+      dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+      dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    });
+    await assertLanding(page, 'Start chatting');
+    await page.evaluate(async () => {
+      window.__staleOpen.error = new Error('SYNTHETIC_STALE_OPEN'); window.__staleOpen.onerror();
+      // Drain the rejected open/initialize/UI chain, not an arbitrary visual timer.
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+    });
+    assert.equal(await page.locator('.status').textContent(), '', 'stale initialization cannot replace recovered status');
+    assert.deepEqual(await readState(page), blank);
     // Invalid local data is recoverable by explicit Reset. The startup-only error
     // must disappear afterward, including when returning to the landing page.
     await page.evaluate(async () => {

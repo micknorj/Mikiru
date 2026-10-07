@@ -7,6 +7,19 @@ import { moodSchema, stateProposalSchema } from '../src/shared/contracts.ts';
 import { recentContext, needsCompaction, compactionRange, conversationText, estimateTokens, inferenceMemory, restoreMemoryReferences, workingMemory } from '../src/shared/context.ts';
 import { LIMITS } from '../src/shared/config.ts';
 import { newFact, now, request, response, snapshot } from './fixtures.ts';
+
+test('close invalidates an in-flight database open without leaking a connection or blocking recovery', async () => {
+  const factory = new IDBFactory(); const storage = new Storage(factory);
+  const opening = storage.initialize(now); storage.close();
+  await assert.rejects(opening, /DATABASE_CLOSED/);
+  const deletion = factory.deleteDatabase(DB_NAME);
+  await new Promise<void>((resolve, reject) => {
+    deletion.onsuccess = () => resolve(); deletion.onerror = () => reject(deletion.error);
+    deletion.onblocked = () => reject(new Error('Leaked opening blocks deletion'));
+  });
+  const recovered = await storage.initialize(now);
+  assert.equal(recovered.meta.revision, 0); assert.deepEqual(recovered.turns, []); storage.close();
+});
 test('fresh database does not open legacy data and atomically commits transcript/state', async () => {
   assert.equal(DB_NAME, 'mikiru');
   const storage = new Storage(new IDBFactory());

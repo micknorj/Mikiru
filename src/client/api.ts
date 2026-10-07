@@ -25,18 +25,25 @@ export class Api {
         method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         credentials: 'omit', cache: 'no-store', body: JSON.stringify(body), signal: combined,
       });
+      // The status is authoritative. An intermediary's stalled/error body must
+      // not turn a quota rejection into a timeout or delay a manual retry.
+      if (response.status === 429) {
+        void response.body?.cancel().catch(() => {});
+        combined.throwIfAborted();
+        throw new ApiFailure('RATE_LIMITED');
+      }
       let data: unknown;
       try { data = JSON.parse(await readBoundedText(response, LIMITS.BODY_BYTES, combined)); }
       catch (error) {
         combined.throwIfAborted();
-        if (!response.ok) throw new ApiFailure(response.status === 429 ? 'RATE_LIMITED' : 'MODEL_UNAVAILABLE');
+        if (!response.ok) throw new ApiFailure('MODEL_UNAVAILABLE');
         if (error instanceof TypeError) throw new ApiFailure('NETWORK_ERROR');
         throw new ApiFailure('MODEL_INVALID_OUTPUT');
       }
       combined.throwIfAborted();
       if (!response.ok) {
         const parsed = apiErrorSchema.safeParse(data);
-        throw new ApiFailure(response.status === 429 ? 'RATE_LIMITED' : parsed.success ? parsed.data.error.code : 'MODEL_UNAVAILABLE');
+        throw new ApiFailure(parsed.success ? parsed.data.error.code : 'MODEL_UNAVAILABLE');
       }
       const parsed = schema.safeParse(data);
       if (!parsed.success) throw new ApiFailure('MODEL_INVALID_OUTPUT');

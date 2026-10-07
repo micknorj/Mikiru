@@ -35,7 +35,7 @@ export function createHandler(core: Core, allowedOrigin: string) {
         if (etag) headers.set('ETag', etag);
         const unchanged = etag && request.headers.get('if-none-match')?.split(',').some(t => t.trim().replace(/^W\//, '') === etag);
         if (unchanged || method === 'HEAD') {
-          await art.body?.cancel();
+          void art.body?.cancel().catch(() => {});
           return new Response(null, { status: unchanged ? 304 : 200, headers });
         }
         return new Response(art.body, { status: 200, headers });
@@ -46,7 +46,7 @@ export function createHandler(core: Core, allowedOrigin: string) {
       if (length && (!/^\d+$/.test(length) || Number(length) > LIMITS.BODY_BYTES)) throw new Failure('INVALID_REQUEST', 413);
       let data: unknown;
       try { data = JSON.parse(await readBoundedText(request, LIMITS.BODY_BYTES, signal)); }
-      catch (error) { throw new Failure('INVALID_REQUEST', error instanceof Error && error.message === 'BODY_LIMIT' ? 413 : 400); }
+      catch (error) { signal.throwIfAborted(); throw new Failure('INVALID_REQUEST', error instanceof Error && error.message === 'BODY_LIMIT' ? 413 : 400); }
       signal.throwIfAborted();
       const response = route === '/api/chat' ? await core.chat(data, signal) : await core.compact(data, signal);
       return Response.json(response, { headers });
