@@ -23,7 +23,7 @@
     "check": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
-    "zod": "4.6.5"
+    "zod": "4.6.6"
   },
   "overrides": {
     "sharp": "0.35.5"
